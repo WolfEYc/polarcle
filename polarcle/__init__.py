@@ -12,6 +12,8 @@ import polars as pl
 from asyncache import cached
 from cachetools import LRUCache
 
+ORACLE_TYPE_CACHE_SIZE = 1000
+
 
 def remove_null_columns(df: pl.DataFrame) -> pl.DataFrame:
     not_null_cols = filter(lambda x: x.null_count() != df.height, df)
@@ -60,7 +62,7 @@ def oracle_to_polars_list(column_name: str, polars_dtype):
     )
 
 
-@cached(cache=LRUCache(maxsize=4))
+@cached(cache=LRUCache(maxsize=ORACLE_TYPE_CACHE_SIZE))
 async def get_oracle_db_type(con: oracledb.AsyncConnection, oracle_type: str):
     return await con.gettype(oracle_type)
 
