@@ -552,12 +552,22 @@ class PoolWrapper:
 
     @overload
     async def insert_many(
-        self, df: pl.DataFrame, table: str, *, return_schema: dict[str, type]
+        self,
+        df: pl.DataFrame,
+        table: str,
+        *,
+        return_schema: dict[str, type],
+        batch_errors: bool = False,
     ) -> pl.DataFrame: ...
 
     @overload
     async def insert_many(
-        self, df: pl.DataFrame, table: str, *, return_schema: None = None
+        self,
+        df: pl.DataFrame,
+        table: str,
+        *,
+        return_schema: None = None,
+        batch_errors: bool = False,
     ) -> None: ...
 
     async def insert_many(

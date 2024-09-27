@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "polarcle"
-version = "0.1.3"
+version = "0.1.4"
 description = "Polars Dataframe integration with Oracle"
 authors = ["iwolf <iwolf@eogresources.com>"]
 readme = "README.md"
