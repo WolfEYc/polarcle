@@ -339,6 +339,7 @@ async def insert_many(
     df: pl.DataFrame,
     table: str,
     *,
+    batch_errors: bool,
     return_schema: Optional[dict[str, type]],
     logger: logging.Logger,
 ):
@@ -362,7 +363,7 @@ async def insert_many(
             insert_sql = returning_state.sql_with_returning
 
         logger.debug(f"Inserting into Oracle with:\n{insert_sql}\nwith df:\n{df}")
-        await cursor.executemany(insert_sql, rows)
+        await cursor.executemany(insert_sql, rows, batcherrors=batch_errors)
         if returning_state is not None:
             return returning_state.collect()
     return None
@@ -565,11 +566,17 @@ class PoolWrapper:
         table: str,
         *,
         return_schema: Optional[dict[str, type]] = None,
+        batch_errors: bool = False,
     ):
         async with self.acquire() as conn:
             conn.autocommit = True
             res = await insert_many(
-                conn, df, table, return_schema=return_schema, logger=self.logger
+                conn,
+                df,
+                table,
+                return_schema=return_schema,
+                logger=self.logger,
+                batch_errors=batch_errors,
             )
             conn.autocommit = False
         return res
@@ -679,10 +686,16 @@ class ConnWrapper:
         df: pl.DataFrame,
         table: str,
         *,
+        batch_errors: bool = False,
         return_schema: Optional[dict[str, type]] = None,
     ):
         return await insert_many(
-            self.conn, df, table, return_schema=return_schema, logger=self.logger
+            self.conn,
+            df,
+            table,
+            return_schema=return_schema,
+            logger=self.logger,
+            batch_errors=batch_errors,
         )
 
     @overload
