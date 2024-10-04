@@ -10,8 +10,6 @@ from typing import Any, Callable, Coroutine, Iterable, NamedTuple, Optional, ove
 import oracledb
 import polars as pl
 
-ORACLE_TYPE_CACHE_SIZE = 1000
-
 
 def remove_null_columns(df: pl.DataFrame) -> pl.DataFrame:
     not_null_cols = filter(lambda x: x.null_count() != df.height, df)
@@ -427,7 +425,6 @@ class PoolWrapper:
     ):
         self.pool_factory = pool_factory
         self.pool = None
-        self.type_cache = {}
         self.logger = logger or logging.getLogger("oracle")
 
     @asynccontextmanager
@@ -460,7 +457,6 @@ class PoolWrapper:
             return await oracle_fetch(
                 conn,
                 query,
-                type_cache=self.type_cache,
                 schema_overrides=schema_overrides,
                 to_lower=to_lower,
                 **kwargs,
@@ -478,7 +474,6 @@ class PoolWrapper:
             return await oracle_call_sproc(
                 conn,
                 proc,
-                type_cache=self.type_cache,
                 out_keys=out_keys,
                 to_lower=to_lower,
                 **kwargs,
