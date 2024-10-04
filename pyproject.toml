@@ -1,6 +1,6 @@
 [project]
 name = "polarcle"
-version = "0.1.9"
+version = "0.1.10"
 description = "Polars Dataframe integration with Oracle"
 authors = [{ name = "iwolf", email = "isaacwolfsite@gmail.com" }]
 readme = "README.md"
