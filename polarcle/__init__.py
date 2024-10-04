@@ -457,7 +457,7 @@ class PoolWrapper:
     @asynccontextmanager
     async def start_transaction(self):
         async with self.acquire() as conn:
-            yield ConnWrapper(conn, self.logger)
+            yield ConnWrapper(conn, self.logger, self.type_cache)
             if conn.transaction_in_progress:
                 await conn.commit()
 
@@ -632,10 +632,17 @@ class PoolWrapper:
 class ConnWrapper:
     conn: oracledb.AsyncConnection
     logger: logging.Logger
+    type_cache: DbTypeCache
 
-    def __init__(self, conn: oracledb.AsyncConnection, logger: logging.Logger):
+    def __init__(
+        self,
+        conn: oracledb.AsyncConnection,
+        logger: logging.Logger,
+        type_cache: DbTypeCache,
+    ):
         self.conn = conn
         self.logger = logger
+        self.type_cache = type_cache
 
     async def fetch(
         self,
@@ -648,6 +655,7 @@ class ConnWrapper:
         return await oracle_fetch(
             self.conn,
             query,
+            self.type_cache,
             schema_overrides=schema_overrides,
             to_lower=to_lower,
             **kwargs,
@@ -664,6 +672,7 @@ class ConnWrapper:
         return await oracle_call_sproc(
             self.conn,
             proc,
+            self.type_cache,
             to_lower=to_lower,
             out_keys=out_keys,
             **kwargs,
