@@ -63,6 +63,7 @@ def oracle_to_polars_list(column_name: str, polars_dtype):
 
 def refresh_type_cache(type_cache: DbTypeCache):
     healty_connections = filter(lambda x: x[0].is_healthy(), type_cache.items())
+    healty_connections = list(healty_connections)
     type_cache.clear()
     type_cache.update(healty_connections)
 
