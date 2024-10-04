@@ -1,11 +1,11 @@
 [project]
 name = "polarcle"
-version = "0.1.7"
+version = "0.1.8"
 description = "Polars Dataframe integration with Oracle"
 authors = [{ name = "iwolf", email = "isaacwolfsite@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["polars", "asyncache", "oracledb"]
+dependencies = ["polars", "oracledb"]
 
 
 [tool.uv]

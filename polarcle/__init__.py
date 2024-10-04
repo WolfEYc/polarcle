@@ -9,10 +9,9 @@ from typing import Any, Callable, Coroutine, Iterable, NamedTuple, Optional, ove
 
 import oracledb
 import polars as pl
-from asyncache import cached
-from cachetools import LRUCache
 
 ORACLE_TYPE_CACHE_SIZE = 1000
+DbTypeCache = dict[oracledb.AsyncConnection, dict[str, oracledb.DbObjectType]]
 
 
 def remove_null_columns(df: pl.DataFrame) -> pl.DataFrame:
@@ -62,9 +61,29 @@ def oracle_to_polars_list(column_name: str, polars_dtype):
     )
 
 
-@cached(cache=LRUCache(maxsize=ORACLE_TYPE_CACHE_SIZE))
-async def get_oracle_db_type(con: oracledb.AsyncConnection, oracle_type: str):
-    return await con.gettype(oracle_type)
+def refresh_type_cache(type_cache: DbTypeCache):
+    healty_connections = filter(lambda x: x[0].is_healthy(), type_cache.items())
+    type_cache.clear()
+    type_cache.update(healty_connections)
+
+
+async def get_oracle_db_type(
+    con: oracledb.AsyncConnection, oracle_type: str, type_cache: DbTypeCache
+) -> oracledb.DbObjectType:
+    refresh_type_cache(type_cache)
+    cached_types = type_cache.get(con)
+    if cached_types is None:
+        db_type = await con.gettype(oracle_type)
+        type_cache[con] = {oracle_type: db_type}
+        return db_type
+
+    cached_type = cached_types.get(oracle_type)
+    if cached_type is None:
+        db_type = await con.gettype(oracle_type)
+        cached_types[oracle_type] = db_type
+        return db_type
+
+    return cached_type
 
 
 def oracle_arraytype(lst: pl.Series):
@@ -75,9 +94,11 @@ def oracle_arraytype(lst: pl.Series):
     return oracle_db_arr_type
 
 
-async def python_list_to_oracle_array(con: oracledb.AsyncConnection, series: pl.Series):
+async def python_list_to_oracle_array(
+    con: oracledb.AsyncConnection, series: pl.Series, type_cache: DbTypeCache
+):
     oracle_db_arr_type = oracle_arraytype(series)
-    oracle_db_arr_type = await get_oracle_db_type(con, oracle_db_arr_type)
+    oracle_db_arr_type = await get_oracle_db_type(con, oracle_db_arr_type, type_cache)
     return oracle_db_arr_type.newobject(series)  # type: ignore
 
 
@@ -90,7 +111,10 @@ def replace_query_lists(query: str, list_keys: Iterable[str]) -> str:
 
 
 async def replace_lists_and_query(
-    con: oracledb.AsyncConnection, query: str, kwargs: dict[str, Any]
+    con: oracledb.AsyncConnection,
+    query: str,
+    kwargs: dict[str, Any],
+    type_cache: DbTypeCache,
 ) -> ListReplacements:
     list_kwargs = filter(lambda item: isinstance(item[1], pl.Series), kwargs.items())
     non_list_kwargs = filter(
@@ -102,7 +126,7 @@ async def replace_lists_and_query(
     query = replace_query_lists(query, list_keys)
 
     list_kwargs = [
-        (item[0], await python_list_to_oracle_array(con, item[1]))
+        (item[0], await python_list_to_oracle_array(con, item[1], type_cache))
         for item in list_kwargs
     ]
 
@@ -112,10 +136,12 @@ async def replace_lists_and_query(
     return ListReplacements(query, new_kwargs)
 
 
-async def replace_lists(con: oracledb.AsyncConnection, kwargs: dict[str, Any]):
+async def replace_lists(
+    con: oracledb.AsyncConnection, kwargs: dict[str, Any], type_cache: DbTypeCache
+):
     list_kwargs = filter(lambda item: isinstance(item[1], pl.Series), kwargs.items())
     list_kwargs = [
-        (item[0], await python_list_to_oracle_array(con, item[1]))
+        (item[0], await python_list_to_oracle_array(con, item[1], type_cache))
         for item in list_kwargs
     ]
     kwargs.update(list_kwargs)
@@ -194,12 +220,13 @@ class ReturningClauseInjection(NamedTuple):
 async def oracle_fetch(
     conn: oracledb.AsyncConnection,
     query: str,
+    type_cache: DbTypeCache,
     *,
     schema_overrides: Optional[dict] = None,
     to_lower: bool = True,
     **kwargs,
 ) -> pl.DataFrame:
-    query, kwargs = await replace_lists_and_query(conn, query, kwargs)
+    query, kwargs = await replace_lists_and_query(conn, query, kwargs, type_cache)
     query = replace_limit_sql(query)
 
     with conn.cursor() as cursor:
@@ -223,12 +250,13 @@ async def oracle_fetch(
 async def oracle_call_sproc(
     conn: oracledb.AsyncConnection,
     proc: str,
+    type_cache: DbTypeCache,
     *,
     out_keys: dict[str, Any],
     to_lower: bool = True,
     **kwargs,
 ) -> dict[str, Any]:
-    kwargs = await replace_lists(conn, kwargs)
+    kwargs = await replace_lists(conn, kwargs, type_cache)
 
     with conn.cursor() as cursor:
         out_vals = map(cursor.var, out_keys.values())  # type: ignore
@@ -406,6 +434,7 @@ class PoolWrapper:
     pool_factory: Callable[..., oracledb.AsyncConnectionPool]
     pool: Optional[oracledb.AsyncConnectionPool]
     logger: logging.Logger
+    type_cache: DbTypeCache
 
     def __init__(
         self,
@@ -414,6 +443,7 @@ class PoolWrapper:
     ):
         self.pool_factory = pool_factory
         self.pool = None
+        self.type_cache = {}
         self.logger = logger or logging.getLogger("oracle")
 
     @asynccontextmanager
@@ -446,6 +476,7 @@ class PoolWrapper:
             return await oracle_fetch(
                 conn,
                 query,
+                type_cache=self.type_cache,
                 schema_overrides=schema_overrides,
                 to_lower=to_lower,
                 **kwargs,
@@ -461,7 +492,12 @@ class PoolWrapper:
     ) -> dict[str, Any]:
         async with self.acquire() as conn:
             return await oracle_call_sproc(
-                conn, proc, out_keys=out_keys, to_lower=to_lower, **kwargs
+                conn,
+                proc,
+                type_cache=self.type_cache,
+                out_keys=out_keys,
+                to_lower=to_lower,
+                **kwargs,
             )
 
     @overload
